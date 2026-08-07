@@ -12,8 +12,8 @@ A minimal Convex app using `@sitegpt/convex` two ways:
 
 ```bash
 npm install
-npx convex dev            # generates convex/_generated
 npx convex env set SITEGPT_API_TOKEN sgpt_...
+npx convex dev            # generates convex/_generated and pushes functions
 ```
 
 Replace `YOUR_CHATBOT_ID` in `articles.ts` and `support.ts` with a chatbot id

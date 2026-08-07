@@ -111,7 +111,7 @@ How it works:
 - `syncDocument` writes a shadow row in the component's own table. Because component mutations join your mutation's transaction, the intent commits atomically with your write. If your mutation throws, nothing is recorded.
 - A scheduled worker pushes the change to SiteGPT right after commit: first push creates a knowledge document, later pushes update it in place (content is re-embedded automatically), `removeDocument` deletes it.
 - Unchanged content is detected by hash and skipped, so calling `syncDocument` on every save is free.
-- Failures retry with exponential backoff (5s doubling, capped at 1h). After 8 attempts the row is marked `failed` and left alone until the next `syncDocument`, `removeDocument`, or `retrySync` for that key.
+- Failures retry with exponential backoff, doubling from 5s (5s, 10s, 20s, ... up to ~11 minutes between tries). After 8 attempts the row is marked `failed` and left alone until the next `syncDocument`, `removeDocument`, or `retrySync` for that key.
 - Everything reasserts state on wake-up: if content changes while a push is in flight, or a delete lands mid-create, the worker converges to the latest intent.
 
 Observe sync state live from a query (it is subscribable like any Convex query):
@@ -126,8 +126,8 @@ export const articleSyncState = query({
 
 Limits worth knowing:
 
-- One synced document holds up to 900k characters of content. Split bigger sources into multiple keys (that also improves retrieval).
-- Pushes run in batches of 10; a bulk import of thousands of documents drains steadily rather than instantly.
+- One synced document holds up to 900 KB of UTF-8 content. Split bigger sources into multiple keys (that also improves retrieval).
+- Pushes run in batches of 10; a bulk import of thousands of documents drains steadily rather than instantly. Deletions are prioritized over content updates so takedowns never wait behind churn.
 
 ## API surface
 
@@ -141,7 +141,7 @@ All API-backed methods run in actions (they call the SiteGPT REST API). Sync met
 | Knowledge documents | `listDocuments`, `getDocument`, `updateDocumentContent`, `deleteDocument`, `deleteDocuments`, `resyncDocuments`, `getDocumentStats` |
 | Conversations | `listConversations`, `getConversation`, `listMessages` |
 | Leads | `listLeads`, `getLead` |
-| Account | `me`, `usage`, `limits`, `listChatbots` |
+| Account | `me`, `usage`, `limits`, `listChatbots`, `getChatbot` |
 
 You can also call the component actions directly via `ctx.runAction(components.sitegpt.knowledge.addLinks, ...)` if you prefer not to use the client class.
 
@@ -157,7 +157,7 @@ Create the API token with the scopes for the methods you use:
 | `listDocuments`, `getDocument`, `getDocumentStats` | `knowledge:read` |
 | `listLeads`, `getLead` | `leads:read` |
 | `me`, `usage`, `limits` | `account:read` |
-| `listChatbots` | `chatbots:read` |
+| `listChatbots`, `getChatbot` | `chatbots:read` |
 
 ## Error handling
 
@@ -183,7 +183,7 @@ A runnable example app lives in [`examples/basic`](./examples/basic): an `articl
 
 ## FAQ
 
-**Does this store my data in Convex?** Only the sync engine stores state: one shadow row per synced key (content is held only until pushed, then cleared). The API wrapper methods store nothing.
+**Does this store my data in Convex?** Only the sync engine stores state: one shadow row per synced key. Content is held in the row until pushed, then cleared; a `failed` row keeps its content so `retrySync` can push it later. The API wrapper methods store nothing.
 
 **Can I sync multiple chatbots?** Yes. Every method takes an optional `chatbotId`; `defaultChatbotId` is just a convenience.
 

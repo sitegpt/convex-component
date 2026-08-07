@@ -36,16 +36,29 @@ import {
  * Every wake-up re-reads the row and reasserts state before acting; retries
  * back off exponentially and give up at MAX_ATTEMPTS (status 'failed',
  * revivable via `retry` or the next `upsert`).
+ *
+ * Claim discipline: claiming a row sets BOTH `leasedUntil` and
+ * `nextAttemptAt` to the same claim timestamp. Bumping `nextAttemptAt`
+ * moves the row out of the due range so in-flight rows never occlude the
+ * claimer's scan window (a bulk import stays claimable batch after batch);
+ * `leasedUntil` doubles as the claim nonce that the worker passes back into
+ * every mark* mutation, so a worker whose lease expired (watchdog re-claimed
+ * the row) can no longer record a stale outcome.
  */
 
 const BATCH = 10
-const LEASE_MS = 5 * 60_000
+// Leases must comfortably outlive the longest possible push batch. Convex
+// actions are killed at 10 minutes, so at 15 minutes a lease can only expire
+// because its worker is dead, never while it is still running; the watchdog
+// therefore cannot steal a claim from a live worker (which would drop its
+// outcome and orphan a created document).
+const LEASE_MS = 15 * 60_000
 const MAX_ATTEMPTS = 8
 const BACKOFF_BASE_MS = 5_000
 const BACKOFF_MAX_MS = 60 * 60_000
-// Convex documents cap at ~1 MiB; the pending payload lives in the row until
-// pushed, so keep headroom for the other fields.
-const MAX_CONTENT_CHARS = 900_000
+// Convex documents cap at ~1 MiB of bytes; the pending payload lives in the
+// row until pushed, so bound its UTF-8 size with headroom for other fields.
+const MAX_CONTENT_BYTES = 900_000
 const MAX_KEY_CHARS = 512
 const MAX_NAME_CHARS = 120
 
@@ -116,10 +129,15 @@ export const upsert = mutation({
         `sync key must be 1..${MAX_KEY_CHARS} characters, got ${args.key.length}`,
       )
     }
-    if (args.content.length > MAX_CONTENT_CHARS) {
-      throw new ConvexError(
-        `sync content is limited to ${MAX_CONTENT_CHARS} characters per document, got ${args.content.length}. Split the source into smaller documents.`,
-      )
+    // The Convex document limit is byte-based; a cheap code-unit pre-check
+    // skips encoding for content that cannot exceed it.
+    if (args.content.length > MAX_CONTENT_BYTES / 4) {
+      const bytes = new TextEncoder().encode(args.content).length
+      if (bytes > MAX_CONTENT_BYTES) {
+        throw new ConvexError(
+          `sync content is limited to ${MAX_CONTENT_BYTES} bytes of UTF-8 per document, got ${bytes}. Split the source into smaller documents.`,
+        )
+      }
     }
     if (args.name !== undefined && args.name.length > MAX_NAME_CHARS) {
       throw new ConvexError(
@@ -166,6 +184,9 @@ export const upsert = mutation({
     }
 
     // Content changed, or the row is failed/deleting and needs reviving.
+    // A leased row goes back into the due-now range here; the claimer's
+    // in-JS lease filter keeps it unclaimed until the in-flight worker
+    // reports and clears the lease.
     await ctx.db.patch(existing._id, {
       ...(args.name !== undefined ? { name: args.name } : {}),
       status: 'pending',
@@ -309,16 +330,19 @@ export const list = query({
 })
 
 /**
- * Claim due rows and hand them to the push worker. Leases (leasedUntil) keep
- * concurrent kicks from double-claiming; a watchdog kick after lease expiry
- * recovers rows whose worker died mid-push.
+ * Claim due rows and hand them to the push worker. 'deleting' rows are
+ * claimed first: a takedown must not starve behind a sustained stream of
+ * content updates (the reverse starvation, updates behind a delete storm, is
+ * bounded because deletes drain). Claiming bumps nextAttemptAt out of the
+ * due range, so in-flight rows never occlude later claims; the watchdog kick
+ * after lease expiry recovers rows whose worker died mid-push.
  */
 export const kick = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now()
     const due: Doc<'syncedDocuments'>[] = []
-    for (const status of ['pending', 'deleting'] as const) {
+    for (const status of ['deleting', 'pending'] as const) {
       if (due.length >= BATCH) {
         break
       }
@@ -327,8 +351,11 @@ export const kick = internalMutation({
         .withIndex('by_status_attempt', (q) =>
           q.eq('status', status).lte('nextAttemptAt', now),
         )
-        .take(BATCH * 3)
+        .take(BATCH + 1)
       for (const row of rows) {
+        // Leased rows normally sit outside the due range (claiming bumps
+        // nextAttemptAt), but an upsert/remove that lands mid-flight resets
+        // nextAttemptAt to now while the lease is still held. Skip those.
         if (isLeased(row, now)) {
           continue
         }
@@ -343,11 +370,13 @@ export const kick = internalMutation({
       return { claimed: 0 }
     }
 
+    const claim = now + LEASE_MS
     for (const row of due) {
-      await ctx.db.patch(row._id, { leasedUntil: now + LEASE_MS })
+      await ctx.db.patch(row._id, { leasedUntil: claim, nextAttemptAt: claim })
     }
     await ctx.scheduler.runAfter(0, internal.sync.push, {
       ids: due.map((row) => row._id),
+      claim,
     })
     // Watchdog: if the push action dies, re-claim after the lease expires.
     await scheduleKick(ctx, LEASE_MS + 10_000)
@@ -367,20 +396,33 @@ export const load = internalQuery({
 /**
  * The outbox worker: performs the remote create/update/delete for each
  * claimed row, then records the outcome. Runs outside any transaction, so it
- * re-reads each row first and lets the mark* mutations reassert state.
+ * re-reads each row first, proves it still holds the claim, and lets the
+ * mark* mutations reassert state (they no-op if the claim went stale).
+ *
+ * Known limitation: if the action dies between a successful create and
+ * markSynced, the retry creates a second remote document and the first is
+ * orphaned in the knowledge base. The create endpoint has no idempotency
+ * key today; scheduled actions are at-most-once, so this needs a crash at
+ * exactly that point and is rare in practice.
  */
 export const push = internalAction({
-  args: { ids: v.array(v.id('syncedDocuments')) },
+  args: { ids: v.array(v.id('syncedDocuments')), claim: v.float64() },
   handler: async (ctx, args) => {
     for (const id of args.ids) {
       const row = await ctx.runQuery(internal.sync.load, { id })
       if (row === null) {
         continue
       }
+      if (row.leasedUntil !== args.claim) {
+        // The lease expired and a watchdog re-claimed this row for another
+        // worker (or an outcome already cleared it). Not ours anymore.
+        continue
+      }
       if (row.status === 'pending') {
         if (row.content === undefined) {
           await ctx.runMutation(internal.sync.markFailed, {
             id,
+            claim: args.claim,
             error: 'sync row has no pending content to push',
           })
           continue
@@ -421,9 +463,12 @@ export const push = internalAction({
               },
             })) as { documents?: { id?: string; error?: string | null }[] }
             const created = data.documents?.[0]
-            if (!created?.id) {
+            if (!created?.id || created.error) {
+              // A per-document error means the upload was rejected even if
+              // an id came back; treating it as synced would silently skip
+              // this content forever (the hash check would keep matching).
               throw new ConvexError(
-                `SiteGPT file upload returned no document id${
+                `SiteGPT file upload did not accept the document${
                   created?.error ? `: ${created.error}` : ''
                 }`,
               )
@@ -432,12 +477,14 @@ export const push = internalAction({
           }
           await ctx.runMutation(internal.sync.markSynced, {
             id,
+            claim: args.claim,
             documentId,
             pushedHash: row.contentHash,
           })
         } catch (error) {
           await ctx.runMutation(internal.sync.markFailed, {
             id,
+            claim: args.claim,
             error: errorText(error),
           })
         }
@@ -460,16 +507,25 @@ export const push = internalAction({
               }
             }
           }
-          await ctx.runMutation(internal.sync.markDeleted, { id })
+          await ctx.runMutation(internal.sync.markDeleted, {
+            id,
+            claim: args.claim,
+            ...(row.documentId !== undefined
+              ? { deletedDocumentId: row.documentId }
+              : {}),
+          })
         } catch (error) {
           await ctx.runMutation(internal.sync.markFailed, {
             id,
+            claim: args.claim,
             error: errorText(error),
           })
         }
+      } else {
+        // Unexpected status under a valid claim (defensive; the claim nonce
+        // should prevent this). Release the row so it isn't stuck leased.
+        await ctx.runMutation(internal.sync.release, { id, claim: args.claim })
       }
-      // Any other status: the world changed while we held the claim
-      // (markSynced already ran, or an upsert reset things). Skip.
     }
   },
 })
@@ -477,12 +533,16 @@ export const push = internalAction({
 export const markSynced = internalMutation({
   args: {
     id: v.id('syncedDocuments'),
+    claim: v.float64(),
     documentId: v.string(),
     pushedHash: v.string(),
   },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id)
-    if (row === null) {
+    if (row === null || row.leasedUntil !== args.claim) {
+      // Stale worker: a watchdog re-claimed the row after our lease expired.
+      // Recording would clobber the live claimant, so drop the outcome (the
+      // remote document we created may be orphaned; see push()'s comment).
       return
     }
     const now = Date.now()
@@ -526,21 +586,29 @@ export const markSynced = internalMutation({
 })
 
 export const markDeleted = internalMutation({
-  args: { id: v.id('syncedDocuments') },
+  args: {
+    id: v.id('syncedDocuments'),
+    claim: v.float64(),
+    deletedDocumentId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id)
-    if (row === null) {
+    if (row === null || row.leasedUntil !== args.claim) {
       return
     }
     if (row.status === 'deleting') {
       await ctx.db.delete(row._id)
       return
     }
-    // Re-upserted while the delete was in flight: the remote document is
-    // gone, so clear the stale id and let the pending push recreate it.
+    // Re-upserted while the delete was in flight. Only clear documentId if
+    // it is still the one we actually deleted; a newer document created by
+    // a faster worker must keep its id.
     const now = Date.now()
     await ctx.db.patch(row._id, {
-      documentId: undefined,
+      ...(args.deletedDocumentId !== undefined &&
+      row.documentId === args.deletedDocumentId
+        ? { documentId: undefined }
+        : {}),
       leasedUntil: undefined,
       nextAttemptAt: now,
       updatedAt: now,
@@ -552,11 +620,12 @@ export const markDeleted = internalMutation({
 export const markFailed = internalMutation({
   args: {
     id: v.id('syncedDocuments'),
+    claim: v.float64(),
     error: v.string(),
   },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id)
-    if (row === null) {
+    if (row === null || row.leasedUntil !== args.claim) {
       return
     }
     const now = Date.now()
@@ -572,7 +641,8 @@ export const markFailed = internalMutation({
       })
       return
     }
-    const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempts, BACKOFF_MAX_MS)
+    // Backoff doubles per attempt starting at BACKOFF_BASE_MS.
+    const delay = Math.min(BACKOFF_BASE_MS * 2 ** (attempts - 1), BACKOFF_MAX_MS)
     await ctx.db.patch(row._id, {
       attempts,
       lastError: args.error,
@@ -581,5 +651,29 @@ export const markFailed = internalMutation({
       updatedAt: now,
     })
     await scheduleKick(ctx, delay)
+  },
+})
+
+/** Defensive: clear a claim without recording an outcome. */
+export const release = internalMutation({
+  args: {
+    id: v.id('syncedDocuments'),
+    claim: v.float64(),
+  },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.id)
+    if (row === null || row.leasedUntil !== args.claim) {
+      return
+    }
+    const now = Date.now()
+    if (row.status === 'pending' || row.status === 'deleting') {
+      await ctx.db.patch(row._id, { leasedUntil: undefined, nextAttemptAt: now })
+      await scheduleKick(ctx)
+      return
+    }
+    await ctx.db.patch(row._id, {
+      leasedUntil: undefined,
+      nextAttemptAt: undefined,
+    })
   },
 })

@@ -51,8 +51,18 @@ function newT() {
   return convexTest(schema, modules)
 }
 
-async function drain(t: ReturnType<typeof newT>) {
-  await t.finishAllScheduledFunctions(vi.runAllTimers)
+/**
+ * Drain scheduled work by stepping simulated time in 1s increments.
+ * Deliberately NOT finishAllScheduledFunctions(vi.runAllTimers): that warps
+ * time a whole lease window per pump, expiring every claim before its +0
+ * push action even starts, which both livelocks the engine under test and
+ * hides real-world liveness characteristics from assertions.
+ */
+async function drain(t: ReturnType<typeof newT>, seconds = 4000) {
+  for (let i = 0; i < seconds; i++) {
+    vi.advanceTimersByTime(1_000)
+    await t.finishInProgressScheduledFunctions()
+  }
 }
 
 describe('transactional knowledge sync', () => {
@@ -263,7 +273,7 @@ describe('transactional knowledge sync', () => {
     expect(page3.nextCursor).toBeNull()
   })
 
-  it('rejects oversized content at the front door', async () => {
+  it('rejects oversized content at the front door, measured in bytes', async () => {
     const t = newT()
     stubFetch(() => okEnvelope({}))
     await expect(
@@ -272,7 +282,17 @@ describe('transactional knowledge sync', () => {
         key: 'k',
         content: 'x'.repeat(900_001),
       }),
-    ).rejects.toThrow('limited to 900000 characters')
+    ).rejects.toThrow('limited to 900000 bytes')
+    // 400k CJK characters fit in UTF-16 length but exceed the byte budget;
+    // catching this here keeps the component's own insert from blowing
+    // Convex's byte-based document limit and rolling back the host mutation.
+    await expect(
+      t.mutation(api.sync.upsert, {
+        chatbotId: BOT,
+        key: 'k',
+        content: '世'.repeat(400_000),
+      }),
+    ).rejects.toThrow('limited to 900000 bytes')
   })
 
   it('kick claims nothing when no rows are due', async () => {
@@ -280,6 +300,155 @@ describe('transactional knowledge sync', () => {
     stubFetch(() => okEnvelope({}))
     const result = await t.mutation(internal.sync.kick, {})
     expect(result).toEqual({ claimed: 0 })
+  })
+
+  it('converges when content changes while the create is in flight', async () => {
+    const t = newT()
+    let midFlightDone = false
+    const calls = stubFetch(async (call) => {
+      if (call.method === 'POST' && !midFlightDone) {
+        midFlightDone = true
+        // The user edits the article while the first push is on the wire.
+        await t.mutation(api.sync.upsert, { chatbotId: BOT, key: 'k', content: 'v2' })
+        return okEnvelope({
+          documents: [{ id: 'doc_1', status: 'QUEUED', error: null }],
+        })
+      }
+      return okEnvelope({ document: { id: 'doc_1', status: 'QUEUED' } })
+    })
+    await t.mutation(api.sync.upsert, { chatbotId: BOT, key: 'k', content: 'v1' })
+    await drain(t)
+
+    // First push created with v1; markSynced saw the newer hash and
+    // re-queued, so a second push PATCHed v2 onto the same document.
+    expect(calls.map((c) => c.method)).toEqual(['POST', 'PATCH'])
+    expect(calls[1]!.body).toEqual({ content: 'v2' })
+    const state = await t.query(api.sync.get, { chatbotId: BOT, key: 'k' })
+    expect(state).toMatchObject({ status: 'synced', documentId: 'doc_1' })
+  })
+
+  it('deletes the document created by an in-flight push when remove lands mid-create', async () => {
+    const t = newT()
+    let removed = false
+    const calls = stubFetch(async (call) => {
+      if (call.method === 'POST' && !removed) {
+        removed = true
+        await t.mutation(api.sync.remove, { chatbotId: BOT, key: 'k' })
+        return okEnvelope({
+          documents: [{ id: 'doc_1', status: 'QUEUED', error: null }],
+        })
+      }
+      return okEnvelope({})
+    })
+    await t.mutation(api.sync.upsert, { chatbotId: BOT, key: 'k', content: 'v1' })
+    await drain(t)
+
+    expect(calls.map((c) => c.method)).toEqual(['POST', 'DELETE'])
+    expect(calls[1]!.url).toContain('/documents/doc_1')
+    const state = await t.query(api.sync.get, { chatbotId: BOT, key: 'k' })
+    expect(state).toBeNull()
+  })
+
+  it('recreates the document when an upsert lands while the delete is in flight', async () => {
+    const t = newT()
+    let created = 0
+    let reupserted = false
+    const calls = stubFetch(async (call) => {
+      if (call.method === 'DELETE' && !reupserted) {
+        reupserted = true
+        await t.mutation(api.sync.upsert, { chatbotId: BOT, key: 'k', content: 'v2' })
+        return okEnvelope({})
+      }
+      if (call.method === 'POST') {
+        created += 1
+        return okEnvelope({
+          documents: [{ id: `doc_${created}`, status: 'QUEUED', error: null }],
+        })
+      }
+      return okEnvelope({})
+    })
+    await t.mutation(api.sync.upsert, { chatbotId: BOT, key: 'k', content: 'v1' })
+    await drain(t)
+    await t.mutation(api.sync.remove, { chatbotId: BOT, key: 'k' })
+    await drain(t)
+
+    // doc_1 created, deleted, then the re-upsert created doc_2 fresh
+    // (markDeleted cleared the stale id because it matched the deleted one).
+    expect(calls.map((c) => c.method)).toEqual(['POST', 'DELETE', 'POST'])
+    const state = await t.query(api.sync.get, { chatbotId: BOT, key: 'k' })
+    expect(state).toMatchObject({ status: 'synced', documentId: 'doc_2' })
+  })
+
+  it('ignores outcome reports carrying a stale claim', async () => {
+    const t = newT()
+    stubFetch(() =>
+      okEnvelope({ documents: [{ id: 'doc_1', status: 'QUEUED', error: null }] }),
+    )
+    await t.mutation(api.sync.upsert, { chatbotId: BOT, key: 'k', content: 'v1' })
+    await drain(t)
+
+    const rowId = await t.run(async (ctx) => {
+      const row = await ctx.db.query('syncedDocuments').first()
+      return row!._id
+    })
+    // A worker whose lease expired reports a different document id; the
+    // claim check must drop it.
+    await t.mutation(internal.sync.markSynced, {
+      id: rowId,
+      claim: 12345,
+      documentId: 'doc_stale',
+      pushedHash: 'whatever',
+    })
+    const state = await t.query(api.sync.get, { chatbotId: BOT, key: 'k' })
+    expect(state).toMatchObject({ status: 'synced', documentId: 'doc_1' })
+  })
+
+  it('treats an upload rejected per-document as a failure even when an id is returned', async () => {
+    const t = newT()
+    stubFetch(() =>
+      okEnvelope({
+        documents: [{ id: 'doc_1', status: 'FAILED', error: 'quota exceeded' }],
+      }),
+    )
+    await t.mutation(api.sync.upsert, { chatbotId: BOT, key: 'k', content: 'v1' })
+    await drain(t)
+    const state = await t.query(api.sync.get, { chatbotId: BOT, key: 'k' })
+    expect(state).toMatchObject({ status: 'failed' })
+    expect(state!.lastError).toContain('quota exceeded')
+  })
+
+  it('drains a 25-row bulk import in seconds, not lease windows', async () => {
+    const t = newT()
+    let created = 0
+    const calls = stubFetch(() => {
+      created += 1
+      return okEnvelope({
+        documents: [{ id: `doc_${created}`, status: 'QUEUED', error: null }],
+      })
+    })
+    const keys = Array.from({ length: 25 }, (_, i) =>
+      `bulk/${String(i).padStart(2, '0')}`,
+    )
+    for (const key of keys) {
+      await t.mutation(api.sync.upsert, {
+        chatbotId: BOT,
+        key,
+        content: `content of ${key}`,
+      })
+    }
+
+    // Deliberately NOT drain(): runAllTimers would fast-forward through
+    // multi-minute stalls and hide liveness bugs. Simulate ~30s of wall
+    // clock; claimed batches must chain without waiting on lease expiry.
+    for (let second = 0; second < 30; second++) {
+      vi.advanceTimersByTime(1_000)
+      await t.finishInProgressScheduledFunctions()
+    }
+
+    expect(calls).toHaveLength(25)
+    const page = await t.query(api.sync.list, { chatbotId: BOT, limit: 100 })
+    expect(page.states).toHaveLength(25)
+    expect(page.states.every((s) => s.status === 'synced')).toBe(true)
   })
 })
 

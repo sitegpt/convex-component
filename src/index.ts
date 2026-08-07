@@ -414,6 +414,16 @@ export class SiteGPT {
     >
   }
 
+  /** Fetch one chatbot. */
+  getChatbot(
+    ctx: RunActionCtx,
+    args?: WithChatbot<Record<never, never>>,
+  ): Promise<Record<string, unknown>> {
+    return ctx.runAction(this.component.account.getChatbot, {
+      chatbotId: this.chatbot(args?.chatbotId),
+    }) as Promise<Record<string, unknown>>
+  }
+
   // ── Transactional knowledge sync ────────────────────────────────────────
 
   /**
