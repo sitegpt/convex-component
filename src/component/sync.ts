@@ -342,6 +342,7 @@ export const kick = internalMutation({
   handler: async (ctx) => {
     const now = Date.now()
     const due: Doc<'syncedDocuments'>[] = []
+    let skippedLeased = 0
     for (const status of ['deleting', 'pending'] as const) {
       if (due.length >= BATCH) {
         break
@@ -357,6 +358,7 @@ export const kick = internalMutation({
         // nextAttemptAt), but an upsert/remove that lands mid-flight resets
         // nextAttemptAt to now while the lease is still held. Skip those.
         if (isLeased(row, now)) {
+          skippedLeased += 1
           continue
         }
         due.push(row)
@@ -367,6 +369,15 @@ export const kick = internalMutation({
     }
 
     if (due.length === 0) {
+      // Leased-but-due rows can fill the whole scan window and hide
+      // unleased due rows sorted behind them. Their workers usually re-kick
+      // on completion, but every completion path that doesn't (see the
+      // mid-flight signal in markSynced/markDeleted) would otherwise leave
+      // this claimer as the last one standing, so retry shortly. Bounded:
+      // leases expire, so this chain cannot outlive LEASE_MS.
+      if (skippedLeased > 0) {
+        await scheduleKick(ctx, 5_000)
+      }
       return { claimed: 0 }
     }
 
@@ -461,12 +472,19 @@ export const push = internalAction({
                   },
                 ],
               },
-            })) as { documents?: { id?: string; error?: string | null }[] }
+            })) as {
+              documents?: { id?: string; status?: string; error?: string | null }[]
+            }
             const created = data.documents?.[0]
-            if (!created?.id || created.error) {
-              // A per-document error means the upload was rejected even if
-              // an id came back; treating it as synced would silently skip
-              // this content forever (the hash check would keep matching).
+            if (
+              !created?.id ||
+              created.error ||
+              created.status?.toUpperCase() === 'FAILED'
+            ) {
+              // A per-document error or failed status means the upload was
+              // rejected even if an id came back; treating it as synced
+              // would silently skip this content forever (the hash check
+              // would keep matching).
               throw new ConvexError(
                 `SiteGPT file upload did not accept the document${
                   created?.error ? `: ${created.error}` : ''
@@ -582,6 +600,16 @@ export const markSynced = internalMutation({
       nextAttemptAt: undefined,
       updatedAt: now,
     })
+    if (row.nextAttemptAt !== row.leasedUntil) {
+      // An untouched claimed row has nextAttemptAt === leasedUntil (both set
+      // to the claim). Inequality means an upsert/remove reset the row while
+      // this push was in flight; the worker read the row after the reset (or
+      // this would have resolved via the mismatch/deleting branches), and
+      // during that window this row may have occluded other due rows from
+      // the claimer's scan. Re-kick so they are picked up now, not at
+      // watchdog time.
+      await scheduleKick(ctx)
+    }
   },
 })
 
@@ -597,7 +625,14 @@ export const markDeleted = internalMutation({
       return
     }
     if (row.status === 'deleting') {
+      // Same mid-flight-reset signal as markSynced: a remove that landed
+      // after the claim put this row back in the due range where it may
+      // have occluded other rows; re-kick on the way out.
+      const resetMidFlight = row.nextAttemptAt !== row.leasedUntil
       await ctx.db.delete(row._id)
+      if (resetMidFlight) {
+        await scheduleKick(ctx)
+      }
       return
     }
     // Re-upserted while the delete was in flight. Only clear documentId if
@@ -641,7 +676,8 @@ export const markFailed = internalMutation({
       })
       return
     }
-    // Backoff doubles per attempt starting at BACKOFF_BASE_MS.
+    // Backoff doubles per attempt starting at BACKOFF_BASE_MS (5s..320s at
+    // the default MAX_ATTEMPTS; the cap only binds if that is ever raised).
     const delay = Math.min(BACKOFF_BASE_MS * 2 ** (attempts - 1), BACKOFF_MAX_MS)
     await ctx.db.patch(row._id, {
       attempts,

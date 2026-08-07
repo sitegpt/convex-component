@@ -302,6 +302,121 @@ describe('transactional knowledge sync', () => {
     expect(result).toEqual({ claimed: 0 })
   })
 
+  it('kick schedules a retry when leased-due rows fill the scan window, and stays quiet otherwise', async () => {
+    const t = newT()
+    stubFetch(() => okEnvelope({}))
+    const now = Date.now()
+    await t.run(async (ctx) => {
+      // 12 rows that look claimed (live lease) but were reset back into the
+      // due range by a mid-flight upsert: they occlude the whole
+      // take(BATCH + 1) window.
+      for (let i = 0; i < 12; i++) {
+        await ctx.db.insert('syncedDocuments', {
+          chatbotId: BOT,
+          key: `occluder/${String(i).padStart(2, '0')}`,
+          status: 'pending',
+          contentHash: 'h',
+          content: 'v2',
+          attempts: 0,
+          updatedAt: now,
+          nextAttemptAt: now,
+          leasedUntil: now + 10 * 60_000,
+        })
+      }
+    })
+    const scheduledKicks = async () =>
+      t.run(async (ctx) => {
+        const jobs = await ctx.db.system.query('_scheduled_functions').collect()
+        return jobs.filter(
+          (j) => j.name.includes('kick') && j.state.kind === 'pending',
+        ).length
+      })
+
+    const before = await scheduledKicks()
+    const result = await t.mutation(internal.sync.kick, {})
+    expect(result).toEqual({ claimed: 0 })
+    // The backstop must re-arm so unleased rows hidden behind the occluders
+    // are claimed in seconds, not at the 15-minute watchdog.
+    expect(await scheduledKicks()).toBe(before + 1)
+
+    // But with nothing due at all, claimed-0 must NOT re-arm (no idle churn).
+    const t2 = newT()
+    const before2 = await t2.run(async (ctx) => {
+      const jobs = await ctx.db.system.query('_scheduled_functions').collect()
+      return jobs.length
+    })
+    await t2.mutation(internal.sync.kick, {})
+    const after2 = await t2.run(async (ctx) => {
+      const jobs = await ctx.db.system.query('_scheduled_functions').collect()
+      return jobs.length
+    })
+    expect(after2).toBe(before2)
+  })
+
+  it('re-kicks from the happy path when the row was reset mid-flight', async () => {
+    const t = newT()
+    stubFetch(() => okEnvelope({}))
+    const now = Date.now()
+    const claim = now + 15 * 60_000
+    // A claimed row whose nextAttemptAt was reset by a mid-flight upsert,
+    // where the worker read the row AFTER the reset: markSynced resolves via
+    // the happy path (hash matches) and must still re-kick.
+    const rowId = await t.run(async (ctx) =>
+      ctx.db.insert('syncedDocuments', {
+        chatbotId: BOT,
+        key: 'k',
+        status: 'pending',
+        contentHash: 'h2',
+        content: 'v2',
+        attempts: 0,
+        updatedAt: now,
+        nextAttemptAt: now,
+        leasedUntil: claim,
+      }),
+    )
+    const scheduledKicks = async () =>
+      t.run(async (ctx) => {
+        const jobs = await ctx.db.system.query('_scheduled_functions').collect()
+        return jobs.filter(
+          (j) => j.name.includes('kick') && j.state.kind === 'pending',
+        ).length
+      })
+    const before = await scheduledKicks()
+    await t.mutation(internal.sync.markSynced, {
+      id: rowId,
+      claim,
+      documentId: 'doc_1',
+      pushedHash: 'h2',
+    })
+    expect(await scheduledKicks()).toBe(before + 1)
+    const state = await t.query(api.sync.get, { chatbotId: BOT, key: 'k' })
+    expect(state).toMatchObject({ status: 'synced', documentId: 'doc_1' })
+
+    // An untouched claimed row (nextAttemptAt === leasedUntil) must NOT
+    // trigger the signal.
+    const rowId2 = await t.run(async (ctx) =>
+      ctx.db.insert('syncedDocuments', {
+        chatbotId: BOT,
+        key: 'k2',
+        status: 'pending',
+        contentHash: 'h1',
+        content: 'v1',
+        attempts: 0,
+        updatedAt: now,
+        nextAttemptAt: claim,
+        leasedUntil: claim,
+      }),
+    )
+    const before2 = await scheduledKicks()
+    await t.mutation(internal.sync.markSynced, {
+      id: rowId2,
+      claim,
+      documentId: 'doc_2',
+      pushedHash: 'h1',
+    })
+    expect(await scheduledKicks()).toBe(before2)
+  })
+
   it('converges when content changes while the create is in flight', async () => {
     const t = newT()
     let midFlightDone = false

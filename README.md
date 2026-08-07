@@ -111,7 +111,7 @@ How it works:
 - `syncDocument` writes a shadow row in the component's own table. Because component mutations join your mutation's transaction, the intent commits atomically with your write. If your mutation throws, nothing is recorded.
 - A scheduled worker pushes the change to SiteGPT right after commit: first push creates a knowledge document, later pushes update it in place (content is re-embedded automatically), `removeDocument` deletes it.
 - Unchanged content is detected by hash and skipped, so calling `syncDocument` on every save is free.
-- Failures retry with exponential backoff, doubling from 5s (5s, 10s, 20s, ... up to ~11 minutes between tries). After 8 attempts the row is marked `failed` and left alone until the next `syncDocument`, `removeDocument`, or `retrySync` for that key.
+- Failures retry with exponential backoff, doubling from 5s (5s, 10s, 20s, ... up to ~5 minutes between tries). After 8 attempts the row is marked `failed` and left alone until the next `syncDocument`, `removeDocument`, or `retrySync` for that key.
 - Everything reasserts state on wake-up: if content changes while a push is in flight, or a delete lands mid-create, the worker converges to the latest intent.
 
 Observe sync state live from a query (it is subscribable like any Convex query):

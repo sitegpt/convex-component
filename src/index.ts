@@ -219,7 +219,10 @@ export class SiteGPT {
     }) as Promise<SiteGptDocumentListResponse>
   }
 
-  /** Fetch one knowledge document, optionally with inline text content. */
+  /**
+   * Fetch one knowledge document. `content` carries file URLs; the inline
+   * `rawText`/`parsedText` fields are only populated with `includeContent`.
+   */
   getDocument(
     ctx: RunActionCtx,
     args: WithChatbot<{
@@ -230,7 +233,7 @@ export class SiteGPT {
   ): Promise<{
     document: SiteGptKnowledgeDocument
     ingestJob: Record<string, unknown> | null
-    content: Record<string, unknown>
+    content?: Record<string, unknown> | null
   }> {
     const { chatbotId, ...rest } = args
     return ctx.runAction(this.component.knowledge.getDocument, {
@@ -239,7 +242,7 @@ export class SiteGPT {
     }) as Promise<{
       document: SiteGptKnowledgeDocument
       ingestJob: Record<string, unknown> | null
-      content: Record<string, unknown>
+      content?: Record<string, unknown> | null
     }>
   }
 
