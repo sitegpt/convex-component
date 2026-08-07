@@ -24,6 +24,13 @@ export const ask = action({
     threadId: v.optional(v.string()),
     pageUrl: v.optional(v.string()),
   },
+  returns: v.object({
+    threadId: v.string(),
+    answer: v.union(v.string(), v.null()),
+    // Full message / conversation payloads from the API; see src/types.ts.
+    message: v.any(),
+    conversation: v.any(),
+  }),
   handler: async (_ctx, args) => {
     const body = {
       message: args.message,

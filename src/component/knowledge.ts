@@ -26,6 +26,8 @@ export const addLinks = action({
     skipExisting: v.optional(v.boolean()),
     scrapeOptions: v.optional(scrapeOptions),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, ...body }) =>
     sitegptRequest({
       method: 'POST',
@@ -47,6 +49,8 @@ export const addSitemap = action({
     skipExisting: v.optional(v.boolean()),
     scrapeOptions: v.optional(scrapeOptions),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, ...body }) =>
     sitegptRequest({
       method: 'POST',
@@ -69,6 +73,8 @@ export const crawlWebsite = action({
     skipExisting: v.optional(v.boolean()),
     scrapeOptions: v.optional(scrapeOptions),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, ...body }) =>
     sitegptRequest({
       method: 'POST',
@@ -84,6 +90,8 @@ export const addYoutube = action({
     urls: v.array(v.string()),
     syncFrequency: v.optional(v.string()),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, ...body }) =>
     sitegptRequest({
       method: 'POST',
@@ -103,6 +111,8 @@ export const setCustomText = action({
     text: v.string(),
     name: v.optional(v.string()),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, ...body }) =>
     sitegptRequest({
       method: 'POST',
@@ -123,6 +133,8 @@ export const uploadFiles = action({
       }),
     ),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, ...body }) =>
     sitegptRequest({
       method: 'POST',
@@ -139,6 +151,8 @@ export const listDocuments = action({
     cursor: v.optional(v.string()),
     ...documentFilters,
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, sources, statuses, types, ...rest }) =>
     sitegptRequest({
       method: 'GET',
@@ -160,6 +174,8 @@ export const getDocument = action({
     includeContent: v.optional(v.boolean()),
     maxContentChars: v.optional(v.float64()),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, args) =>
     sitegptRequest({
       method: 'GET',
@@ -181,6 +197,8 @@ export const updateDocumentContent = action({
     documentId: v.string(),
     content: v.string(),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, args) =>
     sitegptRequest({
       method: 'PATCH',
@@ -198,6 +216,8 @@ export const deleteDocument = action({
     chatbotId: v.string(),
     documentId: v.string(),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, args) =>
     sitegptRequest({
       method: 'DELETE',
@@ -218,6 +238,8 @@ export const deleteDocuments = action({
     all: v.optional(v.boolean()),
     ...documentFilters,
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, ...body }) =>
     sitegptRequest({
       method: 'POST',
@@ -235,6 +257,8 @@ export const resyncDocuments = action({
     all: v.optional(v.boolean()),
     ...documentFilters,
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, ...body }) =>
     sitegptRequest({
       method: 'POST',
@@ -249,6 +273,8 @@ export const getDocumentStats = action({
     chatbotId: v.string(),
     ...documentFilters,
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, { chatbotId, sources, statuses, types, query }) =>
     sitegptRequest({
       method: 'GET',

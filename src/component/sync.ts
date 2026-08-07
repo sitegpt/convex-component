@@ -11,6 +11,7 @@ import {
 import type { Doc, Id } from './_generated/dataModel.js'
 import type { MutationCtx } from './_generated/server.js'
 import { base64FromUtf8, contentHash, toFileName } from './lib/encoding.js'
+import { syncStatus } from './schema.js'
 import {
   chatbotPath,
   errorText,
@@ -63,6 +64,19 @@ const MAX_KEY_CHARS = 512
 const MAX_NAME_CHARS = 120
 
 export type SyncStateStatus = 'pending' | 'synced' | 'deleting' | 'failed'
+
+const syncStateValidator = v.object({
+  key: v.string(),
+  name: v.union(v.string(), v.null()),
+  status: syncStatus,
+  documentId: v.union(v.string(), v.null()),
+  contentHash: v.string(),
+  attempts: v.float64(),
+  lastError: v.union(v.string(), v.null()),
+  updatedAt: v.float64(),
+  nextAttemptAt: v.union(v.float64(), v.null()),
+  hasPendingContent: v.boolean(),
+})
 
 export type SyncState = {
   key: string
@@ -123,6 +137,10 @@ export const upsert = mutation({
     name: v.optional(v.string()),
     content: v.string(),
   },
+  returns: v.object({
+    status: v.union(v.literal('pending'), v.literal('synced')),
+    changed: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     if (args.key.length === 0 || args.key.length > MAX_KEY_CHARS) {
       throw new ConvexError(
@@ -211,6 +229,10 @@ export const remove = mutation({
     chatbotId: v.string(),
     key: v.string(),
   },
+  returns: v.object({
+    status: v.union(v.literal('deleting'), v.null()),
+    changed: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     const now = Date.now()
     const existing = await findRow(ctx, args.chatbotId, args.key)
@@ -246,6 +268,10 @@ export const retry = mutation({
     chatbotId: v.string(),
     key: v.string(),
   },
+  returns: v.object({
+    status: v.union(syncStatus, v.null()),
+    changed: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     const now = Date.now()
     const existing = await findRow(ctx, args.chatbotId, args.key)
@@ -289,6 +315,7 @@ export const get = query({
     chatbotId: v.string(),
     key: v.string(),
   },
+  returns: v.union(syncStateValidator, v.null()),
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query('syncedDocuments')
@@ -310,6 +337,11 @@ export const list = query({
     cursor: v.optional(v.string()),
     limit: v.optional(v.float64()),
   },
+  returns: v.object({
+    states: v.array(syncStateValidator),
+    hasNextPage: v.boolean(),
+    nextCursor: v.union(v.string(), v.null()),
+  }),
   handler: async (ctx, args) => {
     const limit = Math.min(Math.max(Math.floor(args.limit ?? 50), 1), 100)
     const rows = await ctx.db
@@ -339,6 +371,7 @@ export const list = query({
  */
 export const kick = internalMutation({
   args: {},
+  returns: v.object({ claimed: v.float64() }),
   handler: async (ctx) => {
     const now = Date.now()
     const due: Doc<'syncedDocuments'>[] = []
@@ -401,6 +434,7 @@ export const kick = internalMutation({
 
 export const load = internalQuery({
   args: { id: v.id('syncedDocuments') },
+  returns: v.any(),
   handler: async (ctx, args) => ctx.db.get(args.id),
 })
 
@@ -418,6 +452,7 @@ export const load = internalQuery({
  */
 export const push = internalAction({
   args: { ids: v.array(v.id('syncedDocuments')), claim: v.float64() },
+  returns: v.null(),
   handler: async (ctx, args) => {
     for (const id of args.ids) {
       const row = await ctx.runQuery(internal.sync.load, { id })
@@ -555,6 +590,7 @@ export const markSynced = internalMutation({
     documentId: v.string(),
     pushedHash: v.string(),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id)
     if (row === null || row.leasedUntil !== args.claim) {
@@ -619,6 +655,7 @@ export const markDeleted = internalMutation({
     claim: v.float64(),
     deletedDocumentId: v.optional(v.string()),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id)
     if (row === null || row.leasedUntil !== args.claim) {
@@ -658,6 +695,7 @@ export const markFailed = internalMutation({
     claim: v.float64(),
     error: v.string(),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id)
     if (row === null || row.leasedUntil !== args.claim) {
@@ -696,6 +734,7 @@ export const release = internalMutation({
     id: v.id('syncedDocuments'),
     claim: v.float64(),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id)
     if (row === null || row.leasedUntil !== args.claim) {

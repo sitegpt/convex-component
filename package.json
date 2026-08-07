@@ -25,9 +25,11 @@
   "homepage": "https://github.com/sitegpt/convex-component#readme",
   "files": [
     "dist",
+    "src",
     "README.md"
   ],
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
@@ -57,7 +59,11 @@
     "codegen": "convex codegen --component-dir src/component",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepare": "npm run build",
+    "preversion": "npm ci && npm run typecheck && npm test && npm run build",
+    "release": "npm version patch && git push --follow-tags",
+    "alpha": "npm version prerelease --preid alpha && git push --follow-tags"
   },
   "peerDependencies": {
     "convex": ">=1.42.0"

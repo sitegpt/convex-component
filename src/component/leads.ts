@@ -13,6 +13,8 @@ export const list = action({
     limit: v.optional(v.float64()),
     cursor: v.optional(v.string()),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, args) =>
     sitegptRequest({
       method: 'GET',
@@ -33,6 +35,8 @@ export const get = action({
     chatbotId: v.string(),
     leadId: v.string(),
   },
+  // Raw SiteGPT API payload; shapes are documented in src/types.ts.
+  returns: v.any(),
   handler: async (_ctx, args) =>
     sitegptRequest({
       method: 'GET',
