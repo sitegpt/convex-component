@@ -353,6 +353,54 @@ describe('transactional knowledge sync', () => {
     expect(after2).toBe(before2)
   })
 
+  it('re-arms after a partial claim when leased rows occupied the scan window', async () => {
+    const t = newT()
+    stubFetch(() => okEnvelope({}))
+    const now = Date.now()
+    await t.run(async (ctx) => {
+      // Five leased-but-due occluders sorted at the front of the window...
+      for (let i = 0; i < 5; i++) {
+        await ctx.db.insert('syncedDocuments', {
+          chatbotId: BOT,
+          key: `occluder/${i}`,
+          status: 'pending',
+          contentHash: 'h',
+          content: 'v2',
+          attempts: 0,
+          updatedAt: now,
+          nextAttemptAt: now - 1_000,
+          leasedUntil: now + 10 * 60_000,
+        })
+      }
+      // ...and three unleased due rows behind them. The window (BATCH + 1)
+      // still has room, so kick claims these three: a partial claim.
+      for (let i = 0; i < 3; i++) {
+        await ctx.db.insert('syncedDocuments', {
+          chatbotId: BOT,
+          key: `due/${i}`,
+          status: 'pending',
+          contentHash: 'h',
+          content: 'v1',
+          attempts: 0,
+          updatedAt: now,
+          nextAttemptAt: now - 500,
+        })
+      }
+    })
+    const scheduledKicks = async () =>
+      t.run(async (ctx) => {
+        const jobs = await ctx.db.system.query('_scheduled_functions').collect()
+        return jobs.filter(
+          (j) => j.name.includes('kick') && j.state.kind === 'pending',
+        ).length
+      })
+    const result = await t.mutation(internal.sync.kick, {})
+    expect(result).toEqual({ claimed: 3 })
+    // Two pending kicks: the lease watchdog plus the short re-arm that
+    // covers unleased rows possibly hidden behind the skipped leases.
+    expect(await scheduledKicks()).toBe(2)
+  })
+
   it('re-kicks from the happy path when the row was reset mid-flight', async () => {
     const t = newT()
     stubFetch(() => okEnvelope({}))

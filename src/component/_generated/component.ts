@@ -11,8 +11,14 @@ type SiteGptQuery = FunctionReference<'query', Visibility, any, any>
  * (components.sitegpt). Precise argument/result typing lives on the SiteGPT
  * client class; these references are what get passed to
  * ctx.runAction/runMutation/runQuery.
+ *
+ * The Name parameter is unused here but REQUIRED: host-app Convex codegen
+ * emits `ComponentApi<'sitegpt'>` for mounted components, so removing the
+ * parameter breaks every consumer's typecheck.
  */
-export type ComponentApi = {
+export type ComponentApi<
+  Name extends string | undefined = string | undefined,
+> = {
   account: {
     me: SiteGptAction
     usage: SiteGptAction

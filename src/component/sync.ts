@@ -427,6 +427,12 @@ export const kick = internalMutation({
     if (due.length >= BATCH) {
       // There may be more due rows than one batch; keep draining.
       await scheduleKick(ctx, 1_000)
+    } else if (skippedLeased > 0) {
+      // The scan window held leased rows, so unleased due rows may be
+      // sorted behind them, unseen. Same bounded re-arm as the claimed-0
+      // backstop above: retry shortly instead of waiting for an in-flight
+      // worker's completion kick or the watchdog.
+      await scheduleKick(ctx, 5_000)
     }
     return { claimed: due.length }
   },
