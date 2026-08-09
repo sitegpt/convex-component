@@ -25,6 +25,13 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm pack --dry-run
-      - run: npm publish --access public
+      # Prerelease tags (v0.2.0-alpha.1) publish under the alpha dist-tag so
+      # `npm install @sitegpt/convex` keeps resolving to the latest stable.
+      - run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            npm publish --access public --tag alpha
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
