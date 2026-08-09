@@ -153,11 +153,14 @@ Create the API token with the scopes for the methods you use:
 | --- | --- |
 | `ask` | `conversations:write` |
 | `listConversations`, `getConversation`, `listMessages` | `conversations:read` |
-| Knowledge sync + ingestion + document writes | `knowledge:write` |
+| `syncDocument`, `retrySync`, ingestion methods, `updateDocumentContent`, `resyncDocuments` | `knowledge:write` |
+| `removeDocument`, `deleteDocument`, `deleteDocuments` | `knowledge:delete` |
 | `listDocuments`, `getDocument`, `getDocumentStats` | `knowledge:read` |
 | `listLeads`, `getLead` | `leads:read` |
 | `me`, `usage`, `limits` | `account:read` |
 | `listChatbots`, `getChatbot` | `chatbots:read` |
+
+A token used for the knowledge sync needs both `knowledge:write` and `knowledge:delete`: `removeDocument` (and the delete half of the sync engine) calls the document delete endpoints.
 
 ## Error handling
 

@@ -7,9 +7,12 @@ import { chatbotPath, sitegptRequest } from './lib/http.js'
 export const list = action({
   args: {
     chatbotId: v.string(),
+    // The API filters archived vs open leads via status, not a boolean.
+    status: v.optional(
+      v.union(v.literal('all'), v.literal('archived'), v.literal('open')),
+    ),
     query: v.optional(v.string()),
     important: v.optional(v.boolean()),
-    archived: v.optional(v.boolean()),
     limit: v.optional(v.float64()),
     cursor: v.optional(v.string()),
   },
@@ -20,9 +23,9 @@ export const list = action({
       method: 'GET',
       path: chatbotPath(args.chatbotId, '/leads'),
       query: {
+        status: args.status,
         query: args.query,
         important: args.important === undefined ? undefined : String(args.important),
-        archived: args.archived === undefined ? undefined : String(args.archived),
         limit: args.limit,
         cursor: args.cursor,
       },

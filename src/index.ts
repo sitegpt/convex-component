@@ -361,9 +361,9 @@ export class SiteGPT {
   listLeads(
     ctx: RunActionCtx,
     args?: WithChatbot<{
+      status?: 'all' | 'archived' | 'open'
       query?: string
       important?: boolean
-      archived?: boolean
       limit?: number
       cursor?: string
     }>,
