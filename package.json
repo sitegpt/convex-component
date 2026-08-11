@@ -1,0 +1,79 @@
+{
+  "name": "@sitegpt/convex",
+  "version": "0.1.0",
+  "description": "Convex component for SiteGPT: ask your AI support chatbot from Convex functions and keep its knowledge base transactionally in sync with your Convex tables.",
+  "type": "module",
+  "license": "MIT",
+  "private": false,
+  "keywords": [
+    "convex",
+    "component",
+    "sitegpt",
+    "ai",
+    "chatbot",
+    "customer-support",
+    "rag",
+    "knowledge-base"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sitegpt/convex-component.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sitegpt/convex-component/issues"
+  },
+  "homepage": "https://github.com/sitegpt/convex-component#readme",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./convex.config": {
+      "types": "./dist/component/convex.config.d.ts",
+      "import": "./dist/component/convex.config.js"
+    },
+    "./convex.config.js": {
+      "types": "./dist/component/convex.config.d.ts",
+      "import": "./dist/component/convex.config.js"
+    },
+    "./_generated/component": {
+      "types": "./dist/component/_generated/component.d.ts",
+      "import": "./dist/component/_generated/component.js"
+    },
+    "./_generated/component.js": {
+      "types": "./dist/component/_generated/component.d.ts",
+      "import": "./dist/component/_generated/component.js"
+    },
+    "./test": {
+      "types": "./dist/test.d.ts",
+      "import": "./dist/test.js"
+    }
+  },
+  "scripts": {
+    "codegen": "convex codegen --component-dir src/component",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "prepare": "npm run build",
+    "preversion": "npm ci && npm run typecheck && npm test && npm run build",
+    "release": "npm version patch && git push --follow-tags",
+    "alpha": "npm version prerelease --preid alpha && git push --follow-tags"
+  },
+  "peerDependencies": {
+    "convex": ">=1.42.0"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "convex": "^1.42.0",
+    "convex-test": "^0.0.54",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

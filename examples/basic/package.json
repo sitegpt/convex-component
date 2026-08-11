@@ -1,0 +1,12 @@
+{
+  "name": "sitegpt-convex-example-basic",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@sitegpt/convex": "file:../..",
+    "convex": "^1.42.0"
+  },
+  "scripts": {
+    "dev": "convex dev"
+  }
+}

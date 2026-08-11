@@ -1,0 +1,50 @@
+/**
+ * FNV-1a 64-bit over UTF-16 code units, hex-encoded. Used only for change
+ * detection on synced content (skip the push when nothing changed), never for
+ * anything security-sensitive.
+ */
+export function contentHash(input: string): string {
+  let hash = 0xcbf29ce484222325n
+  const prime = 0x100000001b3n
+  const mask = 0xffffffffffffffffn
+  for (let i = 0; i < input.length; i++) {
+    hash ^= BigInt(input.charCodeAt(i))
+    hash = (hash * prime) & mask
+  }
+  return hash.toString(16).padStart(16, '0')
+}
+
+const B64 =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+/** Base64-encode a string's UTF-8 bytes without relying on btoa/Buffer. */
+export function base64FromUtf8(input: string): string {
+  const bytes = new TextEncoder().encode(input)
+  let out = ''
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i]!
+    const b1 = bytes[i + 1]
+    const b2 = bytes[i + 2]
+    out += B64[b0 >> 2]!
+    out += B64[((b0 & 0b11) << 4) | ((b1 ?? 0) >> 4)]!
+    out += b1 === undefined ? '=' : B64[((b1 & 0b1111) << 2) | ((b2 ?? 0) >> 6)]!
+    out += b2 === undefined ? '=' : B64[b2 & 0b111111]!
+  }
+  return out
+}
+
+const FILE_NAME_UNSAFE = /[\\/<>:"|?*\u0000-\u001f]+/gu
+
+/**
+ * Turn a sync key or display name into a knowledge-base file name. Keeps it
+ * readable in the SiteGPT dashboard while stripping anything path-like.
+ */
+export function toFileName(nameOrKey: string): string {
+  const cleaned = nameOrKey
+    .replaceAll(FILE_NAME_UNSAFE, ' ')
+    .replaceAll(/\s+/gu, ' ')
+    .trim()
+    .slice(0, 100)
+  const base = cleaned.length > 0 ? cleaned : 'document'
+  return /\.(md|markdown|txt|html)$/iu.test(base) ? base : `${base}.md`
+}
