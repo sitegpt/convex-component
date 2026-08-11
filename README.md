@@ -1,6 +1,7 @@
 # SiteGPT Convex Component
 
 [![npm version](https://img.shields.io/npm/v/@sitegpt/convex.svg)](https://www.npmjs.com/package/@sitegpt/convex)
+[![Convex Component](https://www.convex.dev/components/badge/sitegpt/convex)](https://www.convex.dev/components/sitegpt/convex)
 
 Add an AI support agent to your Convex app, powered by [SiteGPT](https://sitegpt.ai).
 
