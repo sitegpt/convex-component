@@ -79,5 +79,7 @@ Mapped to https://docs.convex.dev/components/authoring:
   its own tsconfig). Needs `npx convex dev` once to generate `_generated/`.
 - Docs: README with install, quickstart for both features, API table, token
   scope table, error handling, testing, FAQ.
-- Publishing: PUBLISHING.md + tag-triggered publish workflow
-  (`NPM_TOKEN` secret required).
+- Publishing: PUBLISHING.md + tag-triggered publish workflow. No stored
+  npm token: trusted publishing (OIDC) + staged publishing (each release
+  needs a maintainer's 2FA approval) + provenance. First publish is local;
+  see PUBLISHING.md.
