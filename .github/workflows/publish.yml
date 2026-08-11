@@ -6,6 +6,10 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+# No npm token anywhere: authentication is trusted publishing (OIDC).
+# npm mints a short-lived credential from the workflow's identity, so there
+# is no stored secret to steal. Configure the trusted publisher on
+# npmjs.com first — see PUBLISHING.md.
 permissions:
   contents: read
   id-token: write
@@ -20,18 +24,22 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
           cache: npm
+      # Staged publishing needs npm >= 11.15; Node 22 bundles an older npm.
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
       - run: npm pack --dry-run
-      # Prerelease tags (v0.2.0-alpha.1) publish under the alpha dist-tag so
+      # Every release lands STAGED, not live: a maintainer inspects and
+      # approves with 2FA (`npm stage approve <stage-id>` or the Staged
+      # Packages tab on npmjs.com) before the version becomes installable.
+      # The dist-tag is immutable once staged: prerelease tags (a dash in
+      # the version, e.g. v0.2.0-alpha.1) stage under the alpha dist-tag so
       # `npm install @sitegpt/convex` keeps resolving to the latest stable.
       - run: |
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            npm publish --access public --tag alpha
+            npm stage publish --provenance --access public --tag alpha
           else
-            npm publish --access public
+            npm stage publish --provenance --access public
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
