@@ -11,37 +11,42 @@ prepared in advance. Internal file: not shipped in the npm package.
 | GitHub Repo URL | `https://github.com/sitegpt/convex-component` (must be PUBLIC at submission time) |
 | npm package name | `@sitegpt/convex` (must be PUBLISHED at submission time; see PUBLISHING.md) |
 | Live Demo URL or Example App | `https://github.com/sitegpt/convex-component/tree/main/examples/basic` (swap for a hosted demo URL if we build one) |
-| Category | Closest fit in the dropdown, likely `AI` (or `Integrations` if AI is agent-framework-only) |
+| Category | `AI Agents` (decided 2026-08-12 from the live category pages: that shelf already holds vendor API wrappers and finished agents — Exa, Firecrawl, DatabaseChat — and customers describe SiteGPT as an "AI customer support agent", so it is the shelf buyers browse. AI Infrastructure is explicitly "primitives"; Integrations is the PostHog/SES glue shelf) |
 | Short Description (max 160 chars) | `Ask your SiteGPT AI support chatbot from Convex actions and keep its knowledge base transactionally in sync with your Convex tables.` (132 chars) |
 | Tags | `ai, chatbot, customer-support, rag, knowledge-base, sync` |
 | Video URL | none yet (optional) |
 | Logo | `assets/logo.svg` (mark) or `assets/logo-full.svg` (wordmark); SVG accepted |
-| Component Thumbnail | PENDING: 16:9, 1536x864 .webp/.png/.jpg, max 3MB, recommended for companies; needs a design pass |
+| Component Thumbnail | `assets/og-image.jpg` (the sitegpt.ai OG image, 2400x1260). Note: 1.90:1, slightly wider than the recommended 16:9; pad to 1536x864 if their preview crops badly |
 | Your Name | Bhanu Teja Pachipulusu |
 | Email | bhanu@sitegpt.ai (not displayed publicly) |
 | Discord Username | optional |
 
-The form's "Generate Component Directory Content" step builds the
-description / use cases / "how it works" from the README, which is written to
-serve as the listing page. Editable fallback copy:
+The form's "Generate Component Directory Content" step autogenerates from the
+README; the blocks below are the EDITED versions actually submitted
+(2026-08-12) — value-first description, scenario-first use cases, mechanism
+kept in How it Works.
 
-**Use cases**
+**Description**
 
-- In-app "Ask AI" help backed by your product's support chatbot
-- Ticket deflection: answer from the knowledge base before opening a ticket
-- Keep the chatbot's knowledge transactionally in sync with docs/FAQ/product
-  tables that already live in Convex
-- Build custom dashboards over conversations and leads inside your own app
+SiteGPT gives your product an AI support agent trained on your own content. This component connects it to your Convex backend in both directions: call `sitegpt.ask()` from an action to get grounded answers inside your app, and call `sitegpt.syncDocument()` inside your mutations to keep the agent's knowledge base transactionally in sync with your Convex tables. Content that commits is content the bot knows: no cron jobs, no drift, no manual re-uploads. Typed helpers cover the rest of the SiteGPT API: knowledge ingestion, documents, conversations, messages, and leads.
 
-**How it works**
+**Use Cases**
 
-The component wraps SiteGPT's v2 agent API behind typed Convex actions
-(Bearer token via component-bound env). The knowledge sync feature stores a
-shadow row per synced key in the component's own table: `syncDocument()`
-called inside a host mutation commits atomically with the host's write, then
-a lease-claimed outbox worker pushes the create/update/delete to SiteGPT
-with hash-based change detection, exponential backoff, and
-reassert-on-wake convergence for mid-flight edits and deletes.
+- An in-app "Ask AI" box: send the user's question from a Convex action with `sitegpt.ask()` and render the grounded answer, with a `threadId` for follow-up questions
+- Ticket deflection: answer from the knowledge base first, and escalate to your human inbox only when the bot cannot help
+- Docs, FAQs, or product data that already live in Convex tables: `sitegpt.syncDocument()` in the same mutation that saves a row keeps the bot current, and `sitegpt.removeDocument()` makes it forget deleted content
+- Live sync dashboards: `sitegpt.getSyncState()` is a subscribable query, so your admin UI can show each document's push status in real time
+- Custom support analytics: page through conversations, messages, and captured leads with typed helpers and build your own views inside your app
+
+**How it Works**
+
+Mount the component in `convex.config.ts` with `app.use(sitegpt, ...)` and bind a `SITEGPT_API_TOKEN` from your SiteGPT dashboard. Create the `SiteGPT` client with an optional `defaultChatbotId`, then call its methods from your functions. API-backed methods (ask, ingestion, conversations, leads) run in actions; sync methods run in mutations and queries.
+
+`sitegpt.ask()` calls the SiteGPT API, which generates the answer in the same request: one call returns the reply and a `threadId` you can pass back to continue the conversation. Conversations appear in the SiteGPT dashboard like any other chat, so escalation, history, and analytics keep working.
+
+The knowledge sync is transactional. `sitegpt.syncDocument()` records the intended content in the component's own table, inside your mutation's transaction, so the intent commits or rolls back together with your own writes. After commit, a background worker pushes the change to SiteGPT: the first push creates a knowledge document, later pushes update it in place, and `removeDocument()` deletes it. Unchanged content is detected by hash and skipped, deletions are pushed ahead of updates, and failures retry with exponential backoff (5s doubling to about 5 minutes, 8 attempts) before the row is marked `failed` for `retrySync()`.
+
+API errors throw a `ConvexError` whose data carries `status`, `code`, and `message`. Sync failures never surface into your mutations after commit; they are recorded on the sync row as `lastError` and observable through `sitegpt.getSyncState()`.
 
 ## Submission checklist (from the form + FAQ)
 
