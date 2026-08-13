@@ -10,12 +10,12 @@ Two things this component gives you:
 1. **Ask your chatbot from server functions.** Call `sitegpt.ask(ctx, ...)` in an action and get the AI answer back, grounded in your chatbot's knowledge base. Build in-app help, ticket deflection, internal tools, or agent workflows without touching the widget.
 2. **Transactional knowledge sync.** Your product content already lives in Convex tables. Call `sitegpt.syncDocument(ctx, ...)` inside the same mutation that writes your data, and the chatbot's knowledge base follows automatically: the sync intent commits atomically with your write, a background worker pushes it to SiteGPT with retries, and deleting the row makes the bot forget it. No cron jobs, no drift.
 
-Plus typed helpers for the rest of the SiteGPT API: knowledge ingestion (links, sitemaps, crawls, files, YouTube), conversations, messages, and leads.
+Plus typed helpers for the rest of the [SiteGPT API](https://sitegpt.ai/docs/api-reference): knowledge ingestion (links, sitemaps, crawls, files, YouTube), conversations, messages, and leads.
 
 ## Prerequisites
 
 - A [SiteGPT](https://sitegpt.ai) account with a chatbot. No account yet? `npx @sitegpt/cli onboarding start <your-website>` creates a working preview chatbot without signing up.
-- A SiteGPT API token: create one in the dashboard under Settings, or with `sitegpt tokens create`.
+- A [SiteGPT API token](https://sitegpt.ai/docs/developers/api-tokens-and-mcp): create one in the [SiteGPT dashboard](https://sitegpt.ai) under Settings, or with `sitegpt tokens create`.
 
 ## Installation
 
@@ -78,7 +78,7 @@ export const askSupport = action({
 })
 ```
 
-Pass the returned `threadId` on the next call to continue the same conversation. Conversations show up in your SiteGPT dashboard like any other chat, so escalation, history, and analytics keep working.
+Pass the returned `threadId` on the next call to continue the same conversation. Conversations show up in your [SiteGPT dashboard](https://sitegpt.ai) like any other chat, so escalation, history, and analytics keep working.
 
 ## Transactional knowledge sync
 
@@ -132,7 +132,7 @@ Limits worth knowing:
 
 ## API surface
 
-All API-backed methods run in actions (they call the SiteGPT REST API). Sync methods run in mutations and queries.
+All API-backed methods run in actions (they call the [SiteGPT REST API](https://sitegpt.ai/docs/api-reference)). Sync methods run in mutations and queries.
 
 | Area | Methods |
 | --- | --- |
@@ -148,7 +148,7 @@ You can also call the component actions directly via `ctx.runAction(components.s
 
 ### Token scopes
 
-Create the API token with the scopes for the methods you use:
+Create the API token with the [scopes](https://sitegpt.ai/docs/api-reference/v2/authentication) for the methods you use:
 
 | Methods | Scope |
 | --- | --- |
@@ -193,7 +193,7 @@ A runnable example app lives in [`examples/basic`](./examples/basic): an `articl
 
 **What happens if SiteGPT is down during a sync?** The intent is already durable in the shadow row, so nothing is lost: the worker retries with backoff and converges when the API is reachable again.
 
-**Which plans can use this?** Any plan with API access. Rate limits follow your SiteGPT plan.
+**Which plans can use this?** Any plan with API access. Rate limits follow your [SiteGPT plan](https://sitegpt.ai/pricing).
 
 ## License
 
