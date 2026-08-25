@@ -1,6 +1,6 @@
 {
   "name": "@sitegpt/convex",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Convex component for SiteGPT: ask your AI support chatbot from Convex functions and keep its knowledge base transactionally in sync with your Convex tables.",
   "type": "module",
   "license": "MIT",
