@@ -142,7 +142,7 @@ All API-backed methods run in actions (they call the [SiteGPT REST API](https://
 | Knowledge documents | `listDocuments`, `getDocument`, `updateDocumentContent`, `deleteDocument`, `deleteDocuments`, `resyncDocuments`, `getDocumentStats` |
 | Conversations | `listConversations`, `getConversation`, `listMessages` |
 | Leads | `listLeads`, `getLead` |
-| Account | `me`, `usage`, `limits`, `listChatbots`, `getChatbot` |
+| Account | `me`, `usage`, `limits`, `listChatbots`, `getChatbot`, `getChatbotAnalytics` |
 
 You can also call the component actions directly via `ctx.runAction(components.sitegpt.knowledge.addLinks, ...)` if you prefer not to use the client class.
 
@@ -159,7 +159,7 @@ Create the API token with the [scopes](https://sitegpt.ai/docs/api-reference/v2/
 | `listDocuments`, `getDocument`, `getDocumentStats` | `knowledge:read` |
 | `listLeads`, `getLead` | `leads:read` |
 | `me`, `usage`, `limits` | `account:read` |
-| `listChatbots`, `getChatbot` | `chatbots:read` |
+| `listChatbots`, `getChatbot`, `getChatbotAnalytics` | `chatbots:read` |
 
 A token used for the knowledge sync needs both `knowledge:write` and `knowledge:delete`: `removeDocument` (and the delete half of the sync engine) calls the document delete endpoints.
 
