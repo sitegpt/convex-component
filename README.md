@@ -159,7 +159,7 @@ Create the API token with the [scopes](https://sitegpt.ai/docs/api-reference/v2/
 | `listDocuments`, `getDocument`, `getDocumentStats` | `knowledge:read` |
 | `listLeads`, `getLead` | `leads:read` |
 | `me`, `usage`, `limits` | `account:read` |
-| `listChatbots`, `getChatbot` | `chatbots:read` |
+| `listChatbots`, `getChatbot`, `getChatbotAnalytics` | `chatbots:read` |
 
 A token used for the knowledge sync needs both `knowledge:write` and `knowledge:delete`: `removeDocument` (and the delete half of the sync engine) calls the document delete endpoints.
 
