@@ -427,6 +427,25 @@ export class SiteGPT {
     }) as Promise<Record<string, unknown>>
   }
 
+  /**
+   * Daily engagement analytics for a chatbot: widget opens, messages,
+   * conversations started, unique visitors, escalations, and leads,
+   * with totals and a prior-period comparison. startDay/endDay are UTC
+   * days (YYYY-MM-DD); the API defaults to the trailing 30 days.
+   * Requires the analytics entitlement (403 ANALYTICS_LOCKED
+   * otherwise).
+   */
+  getChatbotAnalytics(
+    ctx: RunActionCtx,
+    args?: WithChatbot<{ startDay?: string; endDay?: string }>,
+  ): Promise<Record<string, unknown>> {
+    return ctx.runAction(this.component.account.getChatbotAnalytics, {
+      chatbotId: this.chatbot(args?.chatbotId),
+      ...(args?.startDay === undefined ? {} : { startDay: args.startDay }),
+      ...(args?.endDay === undefined ? {} : { endDay: args.endDay }),
+    }) as Promise<Record<string, unknown>>
+  }
+
   // ── Transactional knowledge sync ────────────────────────────────────────
 
   /**

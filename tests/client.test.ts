@@ -21,6 +21,7 @@ const component = {
     limits: ref('account.limits'),
     listChatbots: ref('account.listChatbots'),
     getChatbot: ref('account.getChatbot'),
+    getChatbotAnalytics: ref('account.getChatbotAnalytics'),
   },
   chat: { ask: ref('chat.ask') },
   conversations: {
@@ -130,6 +131,19 @@ describe('SiteGPT client', () => {
       key: 'faq/refunds',
       name: 'Refund policy',
       content: '30-day refunds, no questions asked.',
+    })
+  })
+
+  it('getChatbotAnalytics resolves the chatbot and passes only the given days', async () => {
+    const calls: Call[] = []
+    const client = new SiteGPT(component, { defaultChatbotId: 'bot_1' })
+    await client.getChatbotAnalytics(actionCtx(calls), {
+      startDay: '2026-08-01',
+    })
+    expect(calls[0]!.ref).toBe(component.account.getChatbotAnalytics)
+    expect(calls[0]!.args).toEqual({
+      chatbotId: 'bot_1',
+      startDay: '2026-08-01',
     })
   })
 

@@ -25,6 +25,7 @@ export type ComponentApi<
     limits: SiteGptAction
     listChatbots: SiteGptAction
     getChatbot: SiteGptAction
+    getChatbotAnalytics: SiteGptAction
   }
   chat: {
     ask: SiteGptAction

@@ -142,7 +142,7 @@ All API-backed methods run in actions (they call the [SiteGPT REST API](https://
 | Knowledge documents | `listDocuments`, `getDocument`, `updateDocumentContent`, `deleteDocument`, `deleteDocuments`, `resyncDocuments`, `getDocumentStats` |
 | Conversations | `listConversations`, `getConversation`, `listMessages` |
 | Leads | `listLeads`, `getLead` |
-| Account | `me`, `usage`, `limits`, `listChatbots`, `getChatbot` |
+| Account | `me`, `usage`, `limits`, `listChatbots`, `getChatbot`, `getChatbotAnalytics` |
 
 You can also call the component actions directly via `ctx.runAction(components.sitegpt.knowledge.addLinks, ...)` if you prefer not to use the client class.
 
